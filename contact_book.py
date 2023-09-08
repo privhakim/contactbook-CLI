@@ -4,6 +4,19 @@ import csv
 import json
 import sqlite3
 
+# Define the database connection and cursor
+conn = sqlite3.connect("contacts.db")
+cursor = conn.cursor()
+
+# Check if the group_id column already exists in the contacts table
+cursor.execute("PRAGMA table_info(contacts)")
+columns = cursor.fetchall()
+column_names = [column[1] for column in columns]
+if 'group_id' not in column_names:
+    # Add the group_id column to the contacts table if it doesn't exist
+    cursor.execute("ALTER TABLE contacts ADD COLUMN group_id INTEGER")
+    conn.commit()
+
 @click.group()
 def cli():
     pass
@@ -13,10 +26,7 @@ def cli():
 @click.option('--phone', prompt='Phone', help='Phone number of the contact')
 @click.option('--group', prompt='Group', help='Group name for the contact')
 def create(name, phone, group):
-    """Create a new contact."""
-    conn = sqlite3.connect("contacts.db")
-    cursor = conn.cursor()
-
+    """Create a new contact."""    
     
     cursor.execute("INSERT OR IGNORE INTO groups (name) VALUES (?)", (group,))
     conn.commit()
@@ -29,15 +39,11 @@ def create(name, phone, group):
     cursor.execute("INSERT INTO contacts (name, phone, group_id) VALUES (?, ?, ?)", (name, phone, group_id))
     conn.commit()
 
-    conn.close()
     click.echo('Contact created successfully!')
 
 @cli.command()
 def view():
     """View all contacts."""
-    conn = sqlite3.connect("contacts.db")
-    cursor = conn.cursor()
-
     cursor.execute("SELECT contacts.id, contacts.name, contacts.phone, groups.name FROM contacts JOIN groups ON contacts.group_id = groups.id")
     contacts = cursor.fetchall()
 
@@ -47,15 +53,10 @@ def view():
     else:
         click.echo('No contacts found.')
 
-    conn.close()
-
 @cli.command()
 @click.argument('name')
 def search(name):
     """Search for a contact by name."""
-    conn = sqlite3.connect("contacts.db")
-    cursor = conn.cursor()
-
     cursor.execute("SELECT contacts.id, contacts.name, contacts.phone, groups.name FROM contacts JOIN groups ON contacts.group_id = groups.id WHERE contacts.name LIKE ?", (f"%{name}%",))
     contacts = cursor.fetchall()
 
@@ -65,4 +66,35 @@ def search(name):
     else:
         click.echo('No matching contacts found.')
 
-    conn.close()    
+@cli.command()
+@click.argument('id', type=int)
+def delete(id):
+    """Delete a contact by ID."""
+    cursor.execute("DELETE FROM contacts WHERE id = ?", (id,))
+    conn.commit()
+
+    click.echo('Contact deleted successfully!')
+
+@cli.command()
+@click.argument('format', type=click.Choice(['csv', 'json']))
+@click.argument('filename', type=click.Path())
+def export(format, filename):
+    """Export contacts to CSV or JSON."""
+    cursor.execute("SELECT contacts.id, contacts.name, contacts.phone, groups.name FROM contacts JOIN groups ON contacts.group_id = groups.id")
+    contacts = cursor.fetchall()
+
+    if format == 'csv':
+        with open(filename, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['ID', 'Name', 'Phone', 'Group'])
+            for contact in contacts:
+                writer.writerow([contact[0], contact[1], contact[2], contact[3]])
+    elif format == 'json':
+        contact_list = [{'ID': contact[0], 'Name': contact[1], 'Phone': contact[2], 'Group': contact[3]} for contact in contacts]
+        with open(filename, 'w') as file:
+            json.dump(contact_list, file, indent=4)
+
+    click.echo(f'Contacts exported to {filename} in {format} format.')
+
+if __name__ == '__main__':
+    cli()
